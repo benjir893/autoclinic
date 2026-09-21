@@ -5,7 +5,6 @@ const jwt = require("jsonwebtoken");
 const cookieparser = require("cookie-parser");
 const dns = require("dns");
 const { MongoClient, ServerApiVersion, ObjectId } = require("mongodb");
-const path = require("path");
 const app = express();
 const port = process.env.PORT || 5000;
 
@@ -14,15 +13,26 @@ if (process.env.NODE_ENV != "production") {
   dns.setServers(["8.8.8.8", "1.1.1.1"]);
 }
 
-//middlewares
+const allowedOrigins = [
+  "http://localhost:5173",
+  "http://localhost:5174",
+  "https://autoclinic-9168b.web.app",
+  "https://autoclinic-9168b.firebaseapp.com",
+];
+
+if (process.env.CLIENT_URL && !allowedOrigins.includes(process.env.CLIENT_URL)) {
+  allowedOrigins.push(process.env.CLIENT_URL);
+}
+
+// Middlewares
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
-      "http://localhost:5174",
-      "https://autoclinic-9168b.web.app",
-      "https://autoclinic-9168b.firebaseapp.com",
-    ],
+    origin(origin, callback) {
+      if (!origin || allowedOrigins.includes(origin)) {
+        return callback(null, true);
+      }
+      return callback(new Error(`Origin ${origin} is not allowed by CORS`));
+    },
     credentials: true,
   }),
 );
@@ -62,6 +72,7 @@ const cookieOptions = {
   httpOnly: true,
   secure: isProduction,
   sameSite: isProduction ? "none" : "lax",
+  partitioned: isProduction,
   path: "/",
 };
 // Create a MongoClient with a MongoClientOptions object to set the Stable API version
@@ -73,17 +84,36 @@ const client = new MongoClient(uri, {
   },
 });
 
-async function run() {
+// Keep one cached connection promise for local Node and Vercel serverless.
+const mongoConnection = client.connect();
+
+// Define collection handles synchronously so every route exists immediately.
+const database = client.db("autoclinic");
+const autousers = database.collection("users");
+const autoservices = database.collection("carservices");
+const servicebooked = database.collection("servicebooking");
+const autoparts = database.collection("carparts");
+const autopartsorder = database.collection("partsordered");
+const employees = database.collection("techteam");
+const feedback = database.collection("feedback");
+
+app.get("/", (req, res) => {
+  res.send("2nd auto server is running");
+});
+
+// Wait for MongoDB before running an API route instead of registering routes late.
+app.use(async (req, res, next) => {
   try {
-    // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
-    const autousers = client.db("autoclinic").collection("users");
-    const autoservices = client.db("autoclinic").collection("carservices");
-    const servicebooked = client.db("autoclinic").collection("servicebooking");
-    const autoparts = client.db("autoclinic").collection("carparts");
-    const autopartsorder = client.db("autoclinic").collection("partsordered");
-    const employees = client.db("autoclinic").collection("techteam");
-    const feedback = client.db("autoclinic").collection("feedback");
+    await mongoConnection;
+    next();
+  } catch (error) {
+    console.error("MongoDB connection failed:", error);
+    res.status(500).send({
+      success: false,
+      message: "Database connection failed",
+    });
+  }
+});
 
     //jwt api
     app.post("/jwt", (req, res) => {
@@ -104,7 +134,7 @@ async function run() {
           .send({ success: true, message: "token stored in cookie" });
       } catch (error) {
         console.error(error);
-        res.status(501).send({ message: "Token is not created" });
+        res.status(500).send({ message: "Token is not created" });
       }
     });
 
@@ -114,19 +144,19 @@ async function run() {
         const email = req.query.email?.trim().toLowerCase();
         if (!email) {
           return res
-            .status(401)
+            .status(400)
             .send({ success: false, message: "email not found" });
         }
         const user = await autousers.findOne({ email });
         if (!user) {
           return res
-            .status(401)
+            .status(404)
             .send({ success: false, message: "user not found" });
         }
         res.send(user);
       } catch (error) {
         console.error(error);
-        res.status(501).send({ success: false, message: "email is required" });
+        res.status(500).send({ success: false, message: "Could not load user" });
       }
     });
 
@@ -381,22 +411,6 @@ async function run() {
         .status(200)
         .send({ success: true, message: "Logged out successfully" });
     });
-    // Send a ping to confirm a successful connection
-    await client.db("admin").command({ ping: 1 });
-    console.log(
-      "Pinged your deployment. You successfully connected to MongoDB!",
-    );
-  } finally {
-    // Ensures that the client will close when you finish/error
-    // await client.close();
-  }
-}
-run().catch(console.dir);
-
-app.get("/", (req, res) => {
-  res.send("2nd auto server is running");
-});
-
 // for locally run
 if (require.main === module) {
   app.listen(port, () => {
