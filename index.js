@@ -397,11 +397,12 @@ app.get("/", (req, res) => {
   res.send("2nd auto server is running");
 });
 
-// for vercel export
+// for locally run
 if (require.main === module) {
   app.listen(port, () => {
     console.log(`auto server is running on ${port}`);
     console.log("Mongo db is connected successfully");
   });
 }
+// export for vercel
 module.exports = app;
