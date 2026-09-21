@@ -404,4 +404,4 @@ if (require.main === module) {
     console.log("Mongo db is connected successfully");
   });
 }
-module.exports == app;
+module.exports = app;
